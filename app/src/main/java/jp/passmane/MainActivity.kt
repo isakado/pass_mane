@@ -61,6 +61,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.OutputStreamWriter
@@ -120,6 +121,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val query = MutableStateFlow("")
 
     val configured: Boolean get() = crypto.isConfigured
+    val unlocked: StateFlow<Boolean> = sessionKey
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     private val _items = MutableStateFlow<List<VaultItem>>(emptyList())
     val items: StateFlow<List<VaultItem>> = combine(_items, query) { entries, search ->
         entries.filter { search.isBlank() || it.service.contains(search, true) || it.username.contains(search, true) }
@@ -161,8 +165,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun delete(id: Long) { viewModelScope.launch { repository.delete(id) } }
     fun lock() { sessionKey.value = null; _items.value = emptyList() }
-    fun isUnlocked() = sessionKey.value != null
-
     private fun openSession(key: SecretKeySpec) {
         sessionKey.value = key
         viewModelScope.launch { repository.observeItems(key).collect { _items.value = it } }
@@ -172,10 +174,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 @Composable
 private fun PassManeApp(viewModel: VaultViewModel, onBiometricUnlock: () -> Unit, onBiometricEnrollment: () -> Unit) {
     var recoveryKey by remember { mutableStateOf<String?>(null) }
+    val unlocked by viewModel.unlocked.collectAsState()
     when {
         recoveryKey != null -> RecoveryKeyScreen(recoveryKey!!, onBiometricEnrollment) { recoveryKey = null }
         !viewModel.configured -> SetupScreen { password -> recoveryKey = viewModel.setup(password) }
-        !viewModel.isUnlocked() -> UnlockScreen(onUnlock = viewModel::unlock, onReset = viewModel::reset, onBiometricUnlock = onBiometricUnlock)
+        !unlocked -> UnlockScreen(onUnlock = viewModel::unlock, onReset = viewModel::reset, onBiometricUnlock = onBiometricUnlock)
         else -> VaultScreen(viewModel)
     }
 }
