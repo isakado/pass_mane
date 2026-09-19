@@ -101,8 +101,16 @@ class CryptoManager(context: Context) {
 
     private fun storeWrappedKeys(dataKey: ByteArray, password: CharArray, recoveryKey: String) {
         val salt = randomBytes(16)
-        val passwordPayload = encrypt(dataKey, randomBytes(12), deriveKey(password, salt))
-        val recoveryPayload = encrypt(dataKey, randomBytes(12), deriveKey(recoveryKey.toCharArray(), salt))
+        val passwordNonce = randomBytes(12)
+        val passwordPayload = EncryptedPayload(
+            encrypt(dataKey, passwordNonce, deriveKey(password, salt)),
+            passwordNonce
+        )
+        val recoveryNonce = randomBytes(12)
+        val recoveryPayload = EncryptedPayload(
+            encrypt(dataKey, recoveryNonce, deriveKey(recoveryKey.toCharArray(), salt)),
+            recoveryNonce
+        )
         preferences.edit()
             .putString("salt", encode(salt))
             .putString("password_wrapped", encode(passwordPayload.ciphertext))
