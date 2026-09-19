@@ -119,7 +119,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val sessionKey = MutableStateFlow<SecretKeySpec?>(null)
     private val query = MutableStateFlow("")
 
-    val configured = crypto.isConfigured
+    val configured: Boolean get() = crypto.isConfigured
     private val _items = MutableStateFlow<List<VaultItem>>(emptyList())
     val items: StateFlow<List<VaultItem>> = combine(_items, query) { entries, search ->
         entries.filter { search.isBlank() || it.service.contains(search, true) || it.username.contains(search, true) }
