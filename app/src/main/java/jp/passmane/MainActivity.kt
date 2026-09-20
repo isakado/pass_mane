@@ -238,20 +238,23 @@ private fun RecoveryKeyScreen(key: String, onEnableBiometrics: () -> Unit, onCon
 private fun VaultScreen(viewModel: VaultViewModel) {
     val entries by viewModel.items.collectAsState()
     var editor by remember { mutableStateOf<VaultItem?>(null) }
+    var searchText by remember { mutableStateOf("") }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri != null) viewModel.getApplication<Application>().contentResolver.openOutputStream(uri)?.use { stream ->
-            OutputStreamWriter(stream).use { writer ->
-                writer.appendLine("service,url,username,password,note")
-                entries.forEach { item -> writer.appendLine(listOf(item.service, item.url, item.username, item.password, item.note).joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" }) }
+        if (uri != null) runCatching {
+            viewModel.getApplication<Application>().contentResolver.openOutputStream(uri)?.use { stream ->
+                OutputStreamWriter(stream).use { writer ->
+                    writer.appendLine("service,url,username,password,note")
+                    entries.forEach { item -> writer.appendLine(listOf(item.service, item.url, item.username, item.password, item.note).joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" }) }
+                }
             }
         }
     }
     Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text("パスまね") }, navigationIcon = { IconButton(viewModel::lock) { Icon(Icons.Default.Lock, "ロック") } }, actions = { IconButton({ exporter.launch("passmane.csv") }) { Icon(Icons.Default.FileDownload, "CSV出力") } }) },
+        topBar = { CenterAlignedTopAppBar(title = { Text("パスまね") }, navigationIcon = { IconButton(viewModel::lock) { Icon(Icons.Default.Lock, "ロック") } }, actions = { IconButton({ runCatching { exporter.launch("passmane.csv") } }) { Icon(Icons.Default.FileDownload, "CSV出力") } }) },
         floatingActionButton = { FloatingActionButton(onClick = { editor = VaultItem(service = "", url = "", username = "", password = "", note = "") }) { Icon(Icons.Default.Add, "登録") } }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            OutlinedTextField("", viewModel::setQuery, label = { Text("検索") }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            OutlinedTextField(searchText, { searchText = it; viewModel.setQuery(it) }, label = { Text("検索") }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(entries, key = { it.id }) { item ->
                     Card(Modifier.fillMaxWidth().clickable { editor = item }) {
