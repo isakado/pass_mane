@@ -3,6 +3,7 @@ package jp.passmane
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -51,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -271,27 +273,38 @@ private fun VaultScreen(viewModel: VaultViewModel) {
     val entries by viewModel.items.collectAsState()
     var editor by remember { mutableStateOf<VaultItem?>(null) }
     var searchText by remember { mutableStateOf("") }
+    val context = LocalContext.current
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri != null) runCatching {
-            viewModel.getApplication<Application>().contentResolver.openOutputStream(uri)?.use { stream ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val result = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { stream ->
                 OutputStreamWriter(stream).use { writer ->
                     writer.appendLine("service,url,username,password,note")
                     entries.forEach { item -> writer.appendLine(listOf(item.service, item.url, item.username, item.password, item.note).joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" }) }
                 }
             }
         }
+        Toast.makeText(context, if (result.isSuccess) "CSVを出力しました" else "CSV出力に失敗しました: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) runCatching {
-            viewModel.getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val result = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
                 viewModel.importCsv(stream.reader(Charsets.UTF_8).readText())
             }
         }
+        Toast.makeText(context, if (result.isSuccess) "CSVを取り込みました" else "CSV取り込みに失敗しました: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
     }
     Scaffold(
         topBar = { CenterAlignedTopAppBar(title = { Text("パスまね") }, navigationIcon = { IconButton(viewModel::lock) { Icon(Icons.Default.Lock, "ロック") } }, actions = {
-            IconButton({ runCatching { importer.launch("text/*") } }) { Icon(Icons.Default.FileUpload, "CSV取り込み") }
-            IconButton({ runCatching { exporter.launch("passmane.csv") } }) { Icon(Icons.Default.FileDownload, "CSV出力") }
+            IconButton({
+                val started = runCatching { importer.launch("text/*") }
+                if (started.isFailure) Toast.makeText(context, "取り込み画面を開けませんでした: ${started.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }) { Icon(Icons.Default.FileUpload, "CSV取り込み") }
+            IconButton({
+                val started = runCatching { exporter.launch("passmane.csv") }
+                if (started.isFailure) Toast.makeText(context, "保存先選択画面を開けませんでした: ${started.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }) { Icon(Icons.Default.FileDownload, "CSV出力") }
         }) },
         floatingActionButton = { FloatingActionButton(onClick = { editor = VaultItem(service = "", url = "", username = "", password = "", note = "") }) { Icon(Icons.Default.Add, "登録") } }
     ) { padding ->
