@@ -186,18 +186,12 @@ private fun PassManeApp(viewModel: VaultViewModel, onBiometricUnlock: () -> Unit
 @Composable
 private fun SetupScreen(onSetup: (CharArray) -> Unit) {
     var password by remember { mutableStateOf("") }
-    var confirmation by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     AuthLayout("保管庫を作成") {
         PasswordField("マスターパスワード", password) { password = it }
-        PasswordField("確認用パスワード", confirmation) { confirmation = it }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(onClick = {
-            error = when {
-                password.isBlank() -> "マスターパスワードを入力してください。"
-                password != confirmation -> "入力したパスワードが一致しません。"
-                else -> null
-            }
+            error = if (password.isBlank()) "マスターパスワードを入力してください。" else null
             if (error == null) onSetup(password.toCharArray())
         }, modifier = Modifier.fillMaxWidth()) { Text("保管庫を作成") }
     }
