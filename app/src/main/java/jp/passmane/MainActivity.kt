@@ -79,11 +79,6 @@ class MainActivity : FragmentActivity() {
         setContent { MaterialTheme { PassManeApp(viewModel, ::requestBiometricUnlock, ::requestBiometricEnrollment) } }
     }
 
-    override fun onStop() {
-        super.onStop()
-        viewModel.lock()
-    }
-
     private fun requestBiometricUnlock() {
         val cipher = viewModel.biometricCipher() ?: return
         BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
