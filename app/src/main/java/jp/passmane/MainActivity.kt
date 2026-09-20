@@ -4,10 +4,8 @@ import android.app.Application
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.clickable
@@ -72,11 +70,68 @@ import javax.crypto.spec.SecretKeySpec
 
 class MainActivity : FragmentActivity() {
     private val viewModel: VaultViewModel by viewModels()
+    private var exportEntries: List<VaultItem> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { MaterialTheme { PassManeApp(viewModel, ::requestBiometricUnlock, ::requestBiometricEnrollment) } }
+    }
+
+    fun exportCsv(entries: List<VaultItem>) {
+        exportEntries = entries
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "text/csv"
+                putExtra(Intent.EXTRA_TITLE, "passmane.csv")
+            },
+            EXPORT_REQUEST_CODE
+        )
+    }
+
+    fun importCsv() {
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "text/*"
+            },
+            IMPORT_REQUEST_CODE
+        )
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK) return
+        if (requestCode == IMPORT_REQUEST_CODE) {
+            val uri = data?.data ?: return
+            runCatching {
+                contentResolver.openInputStream(uri)?.use { stream ->
+                    viewModel.importCsv(stream.reader(Charsets.UTF_8).readText())
+                } ?: error("ファイルを開けませんでした")
+            }.onSuccess {
+                Toast.makeText(this, "CSVを取り込みました", Toast.LENGTH_LONG).show()
+            }.onFailure {
+                Toast.makeText(this, "CSV取り込みに失敗しました: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+        if (requestCode != EXPORT_REQUEST_CODE) return
+        val uri = data?.data ?: return
+        runCatching {
+            contentResolver.openOutputStream(uri)?.use { stream ->
+                OutputStreamWriter(stream).use { writer ->
+                    writer.appendLine("service,url,username,password,note")
+                    exportEntries.forEach { item ->
+                        writer.appendLine(listOf(item.service, item.url, item.username, item.password, item.note).joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" })
+                    }
+                }
+            } ?: error("保存先を開けませんでした")
+        }.onSuccess {
+            Toast.makeText(this, "CSVを出力しました", Toast.LENGTH_LONG).show()
+        }.onFailure {
+            Toast.makeText(this, "CSV出力に失敗しました: ${it.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun requestBiometricUnlock() {
@@ -109,6 +164,11 @@ class MainActivity : FragmentActivity() {
                 .build(),
             BiometricPrompt.CryptoObject(cipher)
         )
+    }
+
+    companion object {
+        private const val EXPORT_REQUEST_CODE = 1001
+        private const val IMPORT_REQUEST_CODE = 1002
     }
 }
 
@@ -269,35 +329,14 @@ private fun VaultScreen(viewModel: VaultViewModel) {
     var editor by remember { mutableStateOf<VaultItem?>(null) }
     var searchText by remember { mutableStateOf("") }
     val context = LocalContext.current
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val result = runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { stream ->
-                OutputStreamWriter(stream).use { writer ->
-                    writer.appendLine("service,url,username,password,note")
-                    entries.forEach { item -> writer.appendLine(listOf(item.service, item.url, item.username, item.password, item.note).joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" }) }
-                }
-            }
-        }
-        Toast.makeText(context, if (result.isSuccess) "CSVを出力しました" else "CSV出力に失敗しました: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-    }
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val result = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                viewModel.importCsv(stream.reader(Charsets.UTF_8).readText())
-            }
-        }
-        Toast.makeText(context, if (result.isSuccess) "CSVを取り込みました" else "CSV取り込みに失敗しました: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-    }
     Scaffold(
         topBar = { CenterAlignedTopAppBar(title = { Text("パスまね") }, navigationIcon = { IconButton(viewModel::lock) { Icon(Icons.Default.Lock, "ロック") } }, actions = {
             IconButton({
-                val started = runCatching { importer.launch("text/*") }
+                val started = runCatching { (context as? MainActivity)?.importCsv() }
                 if (started.isFailure) Toast.makeText(context, "取り込み画面を開けませんでした: ${started.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
             }) { Icon(Icons.Default.FileUpload, "CSV取り込み") }
             IconButton({
-                val started = runCatching { exporter.launch("passmane.csv") }
+                val started = runCatching { (context as? MainActivity)?.exportCsv(entries) }
                 if (started.isFailure) Toast.makeText(context, "保存先選択画面を開けませんでした: ${started.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
             }) { Icon(Icons.Default.FileDownload, "CSV出力") }
         }) },
