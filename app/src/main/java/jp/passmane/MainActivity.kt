@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -165,10 +166,41 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun delete(id: Long) { viewModelScope.launch { repository.delete(id) } }
     fun lock() { sessionKey.value = null; _items.value = emptyList() }
+
+    fun importCsv(text: String) {
+        val key = sessionKey.value ?: return
+        val rows = text.lineSequence().map(::parseCsvLine).filter { it.size >= 5 }.toList()
+        val dataRows = if (rows.firstOrNull()?.getOrNull(0)?.equals("service", ignoreCase = true) == true) rows.drop(1) else rows
+        viewModelScope.launch {
+            dataRows.forEach { columns ->
+                repository.save(VaultItem(service = columns[0], url = columns[1], username = columns[2], password = columns[3], note = columns[4]), key)
+            }
+        }
+    }
+
     private fun openSession(key: SecretKeySpec) {
         sessionKey.value = key
         viewModelScope.launch { repository.observeItems(key).collect { _items.value = it } }
     }
+}
+
+private fun parseCsvLine(line: String): List<String> {
+    val fields = mutableListOf<String>()
+    val current = StringBuilder()
+    var inQuotes = false
+    var i = 0
+    while (i < line.length) {
+        val c = line[i]
+        when {
+            inQuotes && c == '"' && i + 1 < line.length && line[i + 1] == '"' -> { current.append('"'); i++ }
+            c == '"' -> inQuotes = !inQuotes
+            c == ',' && !inQuotes -> { fields.add(current.toString()); current.clear() }
+            else -> current.append(c)
+        }
+        i++
+    }
+    fields.add(current.toString())
+    return fields
 }
 
 @Composable
@@ -249,8 +281,18 @@ private fun VaultScreen(viewModel: VaultViewModel) {
             }
         }
     }
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) runCatching {
+            viewModel.getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
+                viewModel.importCsv(stream.reader(Charsets.UTF_8).readText())
+            }
+        }
+    }
     Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text("パスまね") }, navigationIcon = { IconButton(viewModel::lock) { Icon(Icons.Default.Lock, "ロック") } }, actions = { IconButton({ runCatching { exporter.launch("passmane.csv") } }) { Icon(Icons.Default.FileDownload, "CSV出力") } }) },
+        topBar = { CenterAlignedTopAppBar(title = { Text("パスまね") }, navigationIcon = { IconButton(viewModel::lock) { Icon(Icons.Default.Lock, "ロック") } }, actions = {
+            IconButton({ runCatching { importer.launch("text/*") } }) { Icon(Icons.Default.FileUpload, "CSV取り込み") }
+            IconButton({ runCatching { exporter.launch("passmane.csv") } }) { Icon(Icons.Default.FileDownload, "CSV出力") }
+        }) },
         floatingActionButton = { FloatingActionButton(onClick = { editor = VaultItem(service = "", url = "", username = "", password = "", note = "") }) { Icon(Icons.Default.Add, "登録") } }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
